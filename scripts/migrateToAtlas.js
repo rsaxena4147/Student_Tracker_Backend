@@ -5,8 +5,7 @@
 const mongoose = require('mongoose');
 
 const LOCAL = 'mongodb://127.0.0.1:27017/student_tracker';
-const ATLAS = process.env.MONGO_URI_ATLAS
-  || 'mongodb+srv://rimjhimsaxena535:rimmih%40123@cluster0.lgkabnq.mongodb.net/student_tracker?retryWrites=true&w=majority';
+const ATLAS = process.env.MONGO_URI_ATLAS;
 
 const generic = new mongoose.Schema({}, { strict: false });
 
