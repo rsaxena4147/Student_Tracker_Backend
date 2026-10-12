@@ -3,10 +3,26 @@ const asyncHandler = require('express-async-handler');
 const Student = require('../models/Student');
 const SolveRecord = require('../models/SolveRecord');
 const ContestRecord = require('../models/ContestRecord');
+const { buildStudentsWorkbook, safeFileName } = require('../utils/exportExcel');
 
 const router = express.Router();
 
 function monthKey(y, m) { return `${y}-${String(m).padStart(2, '0')}`; }
+
+// GET /api/students/:id/export — Excel for a single student (summary + monthly LC/CC split)
+router.get('/:id/export', asyncHandler(async (req, res) => {
+  const s = await Student.findById(req.params.id).populate('classId').lean();
+  if (!s) return res.status(404).json({ message: 'Student not found' });
+  const groupDef = { _id: { s: '$studentId', p: '$platform', y: '$year', m: '$month' }, n: { $sum: 1 } };
+  const solveAgg = await SolveRecord.aggregate([{ $match: { studentId: s._id } }, { $group: groupDef }]);
+  const contestAgg = await ContestRecord.aggregate([{ $match: { studentId: s._id } }, { $group: groupDef }]);
+  const className = (s.classId && s.classId.name) || 'student';
+  const { buffer } = buildStudentsWorkbook({ className, students: [s], solveAgg, contestAgg });
+  const filename = safeFileName(`${className} - ${s.name}`) + '.xlsx';
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(buffer);
+}));
 
 async function buildStudentPayload(student) {
   const solves = await SolveRecord.find({ studentId: student._id }).lean();

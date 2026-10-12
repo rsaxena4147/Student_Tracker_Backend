@@ -4,6 +4,7 @@ const Class = require('../models/Class');
 const Student = require('../models/Student');
 const SolveRecord = require('../models/SolveRecord');
 const ContestRecord = require('../models/ContestRecord');
+const { buildStudentsWorkbook } = require('../utils/exportExcel');
 
 const router = express.Router();
 
@@ -40,6 +41,21 @@ router.get('/', asyncHandler(async (req, res) => {
     });
   }
   res.json(out);
+}));
+
+// GET /api/classes/:id/export — Excel: per-student totals + monthly LC/CC split
+router.get('/:id/export', asyncHandler(async (req, res) => {
+  const cls = await Class.findById(req.params.id).lean();
+  if (!cls) return res.status(404).json({ message: 'Class not found' });
+  const students = await Student.find({ classId: cls._id }).sort({ rollNo: 1 }).lean();
+  const ids = students.map((s) => s._id);
+  const groupDef = { _id: { s: '$studentId', p: '$platform', y: '$year', m: '$month' }, n: { $sum: 1 } };
+  const solveAgg = ids.length ? await SolveRecord.aggregate([{ $match: { studentId: { $in: ids } } }, { $group: groupDef }]) : [];
+  const contestAgg = ids.length ? await ContestRecord.aggregate([{ $match: { studentId: { $in: ids } } }, { $group: groupDef }]) : [];
+  const { buffer, filename } = buildStudentsWorkbook({ className: cls.name, students, solveAgg, contestAgg });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(buffer);
 }));
 
 // GET /api/classes/:id/students?q=&sort=&page=&limit=
