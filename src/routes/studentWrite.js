@@ -1,8 +1,9 @@
-const asyncHandler = require('express-async-handler');
+﻿const asyncHandler = require('express-async-handler');
 const Student = require('../models/Student');
 const ContestRecord = require('../models/ContestRecord');
-const { fetchLeetCodeUser, parseStats } = require('../services/leetcode');
-const { fetchCodeChefUser } = require('../services/codechef');
+const SolveRecord = require('../models/SolveRecord');
+const { fetchLeetCodeUser, parseStats } = require('./services/leetcode');
+const { fetchCodeChefUser } = require('./services/codechef');
 
 async function applySync(student, st) {
   student.leetcode.totalSolved = st.totalSolved;
@@ -84,13 +85,63 @@ async function syncOneStudent(s) {
 }
 
 function registerSyncAndRecordRoutes(router) {
-  // POST /api/students/:id/sync — syncs BOTH LeetCode and CodeChef
+  // POST /api/students/:id/sync
   router.post('/:id/sync', asyncHandler(async (req, res) => {
     const s = await Student.findById(req.params.id);
     if (!s) return res.status(404).json({ message: 'Student not found' });
-    if (!s.leetcodeId && !s.codechefId) return res.status(400).json({ message: 'No LeetCode/CodeChef username on file' });
-    const result = await syncOneStudent(s);
-    res.json({ message: 'Sync finished', result });
+    if (!s.leetcodeId) return res.status(400).json({ message: 'No LeetCode username on file' });
+    try {
+      const payload = await fetchLeetCodeUser(s.leetcodeId);
+      const st = parseStats(payload);
+      if (!st.exists) {
+        s.leetcode.syncError = 'LeetCode user not found';
+        s.leetcode.syncedAt = new Date();
+        await s.save();
+        return res.status(404).json({ message: 'LeetCode user not found' });
+      }
+      await applySync(s, st);
+      res.json({ message: 'LeetCode synced', stats: { totalSolved: st.totalSolved, contests: st.attendedContestsCount } });
+    } catch (e) {
+      s.leetcode.syncError = String((e && e.message) || e).slice(0, 300);
+      s.leetcode.syncedAt = new Date();
+      await s.save();
+      res.status(502).json({ message: 'LeetCode sync failed: ' + s.leetcode.syncError });
+    }
+  }));
+
+  // POST /api/students/:id/records
+  router.post('/:id/records', asyncHandler(async (req, res) => {
+    const s = await Student.findById(req.params.id);
+    if (!s) return res.status(404).json({ message: 'Student not found' });
+    const { kind } = req.body;
+    if (kind === 'solve') {
+      const { platform, title, problemKey, difficulty = '', solvedAt = null } = req.body;
+      if (!['leetcode', 'codechef'].includes(platform)) return res.status(400).json({ message: 'platform must be leetcode|codechef' });
+      if (!title && !problemKey) return res.status(400).json({ message: 'title or problemKey required' });
+      const key = String(problemKey || title).trim().toLowerCase().replace(/\s+/g, '-');
+      const d = solvedAt ? new Date(solvedAt) : null;
+      if (solvedAt && Number.isNaN(d.getTime())) return res.status(400).json({ message: 'Invalid solvedAt date' });
+      const doc = await SolveRecord.findOneAndUpdate(
+        { studentId: s._id, platform, problemKey: key },
+        { $set: { title: title || key, difficulty, solvedAt: d, year: d ? d.getFullYear() : null, month: d ? d.getMonth() + 1 : null, source: 'manual' } },
+        { upsert: true, new: true }
+      );
+      return res.status(201).json(doc);
+    }
+    if (kind === 'contest') {
+      const { platform, contestName, date = null, rank = null, score = null, rating = null } = req.body;
+      if (!['leetcode', 'codechef'].includes(platform)) return res.status(400).json({ message: 'platform must be leetcode|codechef' });
+      if (!contestName) return res.status(400).json({ message: 'contestName required' });
+      const d = date ? new Date(date) : null;
+      if (date && Number.isNaN(d.getTime())) return res.status(400).json({ message: 'Invalid date' });
+      const doc = await ContestRecord.findOneAndUpdate(
+        { studentId: s._id, platform, contestName: String(contestName).trim() },
+        { $set: { date: d, year: d ? d.getFullYear() : null, month: d ? d.getMonth() + 1 : null, rank, score, rating, attended: true, source: 'manual' } },
+        { upsert: true, new: true }
+      );
+      return res.status(201).json(doc);
+    }
+    return res.status(400).json({ message: 'kind must be solve|contest' });
   }));
 }
 
