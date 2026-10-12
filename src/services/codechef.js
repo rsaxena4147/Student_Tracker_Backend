@@ -16,8 +16,9 @@ async function fetchCodeChefPage(username) {
 // A real profile has title "<user> | CodeChef User Profile for <Name> | CodeChef".
 function isRealProfile(html, username) {
   const m = /<title>([\s\S]*?)<\/title>/i.exec(html);
-  const title = m ? m[1].trim() : '';
-  return title.toLowerCase().startsWith(String(username).toLowerCase());
+  const title = m ? String(m[1] || '').trim() : '';
+  const u = String(username || '').trim().toLowerCase();
+  return u.length > 0 && title.toLowerCase().includes(u);
 }
 
 function parseCodeChef(html, username) {
