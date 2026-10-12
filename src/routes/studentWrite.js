@@ -109,6 +109,55 @@ function registerSyncAndRecordRoutes(router) {
     }
   }));
 
+  // PATCH /api/students/:id — edit name / LeetCode / CodeChef usernames
+  router.patch('/:id', asyncHandler(async (req, res) => {
+    const s = await Student.findById(req.params.id);
+    if (!s) return res.status(404).json({ message: 'Student not found' });
+    const { name, leetcodeId, codechefId } = req.body || {};
+    if (name !== undefined) {
+      const n = String(name).trim();
+      if (!n) return res.status(400).json({ message: 'Name cannot be empty' });
+      s.name = n;
+    }
+    if (leetcodeId !== undefined) {
+      const v = String(leetcodeId).trim().replace(/\s+/g, '');
+      if (v !== s.leetcodeId) {
+        s.leetcodeId = v;
+        // snapshot belongs to the previous profile — clear so stale stats don't show
+        s.leetcode.totalSolved = 0;
+        s.leetcode.easy = 0;
+        s.leetcode.medium = 0;
+        s.leetcode.hard = 0;
+        s.leetcode.ranking = null;
+        s.leetcode.streak = 0;
+        s.leetcode.totalActiveDays = 0;
+        s.leetcode.contestRating = null;
+        s.leetcode.contestGlobalRanking = null;
+        s.leetcode.attendedContestsCount = 0;
+        s.leetcode.syncedAt = null;
+        s.leetcode.syncError = '';
+        s.leetcode.monthlyActivityCache = {};
+        s.leetcode.dailyActivityCache = [];
+        s.leetcode.recentAcceptedCache = [];
+      }
+    }
+    if (codechefId !== undefined) {
+      const v = String(codechefId).trim().replace(/\s+/g, '');
+      if (v !== s.codechefId) {
+        s.codechefId = v;
+        s.codechef.totalSolved = 0;
+        s.codechef.rating = null;
+        s.codechef.attendedContestsCount = 0;
+        s.codechef.syncedAt = null;
+        s.codechef.syncError = '';
+        s.codechef.monthlyActivityCache = {};
+        s.codechef.dailyActivityCache = [];
+      }
+    }
+    await s.save();
+    res.json({ message: 'Student updated', student: s });
+  }));
+
   // POST /api/students/:id/records
   router.post('/:id/records', asyncHandler(async (req, res) => {
     const s = await Student.findById(req.params.id);
